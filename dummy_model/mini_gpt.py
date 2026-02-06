@@ -6,7 +6,6 @@ The goal is to build upon the initial version with more features from modern
 transsformer architectures.
 """
 
-
 import math
 import pathlib
 import click
@@ -19,27 +18,27 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 # ---------------------------------------------------------------------------
 # 1. CONFIGURATION
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class GPTConfig:
     # Model architecture
-    vocab_size: int = 256          # Byte-level tokenizer
-    block_size: int = 256          # Maximum context length (sequence length)
-    n_layer: int = 6               # Number of transformer blocks
-    n_head: int = 6                # Number of attention heads
-    n_embd: int = 384              # Embedding dimensionality
-    dropout: float = 0.2           # Dropout rate
+    vocab_size: int = 256  # Byte-level tokenizer
+    block_size: int = 256  # Maximum context length (sequence length)
+    n_layer: int = 6  # Number of transformer blocks
+    n_head: int = 6  # Number of attention heads
+    n_embd: int = 384  # Embedding dimensionality
+    dropout: float = 0.2  # Dropout rate
 
     # Training
-    batch_size: int = 64           # Sequences per batch
-    learning_rate: float = 3e-4    # AdamW learning rate
-    max_iters: int = 5000          # Total training steps
-    eval_interval: int = 500       # How often to evaluate
-    eval_iters: int = 200          # Batches to average over when evaluating
+    batch_size: int = 64  # Sequences per batch
+    learning_rate: float = 3e-4  # AdamW learning rate
+    max_iters: int = 5000  # Total training steps
+    eval_interval: int = 500  # How often to evaluate
+    eval_iters: int = 200  # Batches to average over when evaluating
 
     # Hardware
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -48,6 +47,7 @@ class GPTConfig:
 # ---------------------------------------------------------------------------
 # 2. DATA LOADING
 # ---------------------------------------------------------------------------
+
 
 class TextDataset:
     """
@@ -60,19 +60,21 @@ class TextDataset:
     def __init__(self, text: str, config: GPTConfig):
         self.config = config
         # Byte-level encoding: every character is its own token (0–255)
-        self.data = torch.tensor(
-            [b for b in text.encode("utf-8")], dtype=torch.long
-        )
+        self.data = torch.tensor([b for b in text.encode("utf-8")], dtype=torch.long)
         # Train/val split (90/10)
         n = int(0.9 * len(self.data))
         self.train_data = self.data[:n]
         self.val_data = self.data[n:]
-        print(f"Dataset: {len(self.data):,} bytes | "
-              f"train: {len(self.train_data):,} | val: {len(self.val_data):,}")
+        print(
+            f"Dataset: {len(self.data):,} bytes | "
+            f"train: {len(self.train_data):,} | val: {len(self.val_data):,}"
+        )
 
     def get_batch(self, split: str) -> tuple[torch.Tensor, torch.Tensor]:
         data = self.train_data if split == "train" else self.val_data
-        ix = torch.randint(len(data) - self.config.block_size, (self.config.batch_size,))
+        ix = torch.randint(
+            len(data) - self.config.block_size, (self.config.batch_size,)
+        )
         x = torch.stack([data[i : i + self.config.block_size] for i in ix])
         y = torch.stack([data[i + 1 : i + self.config.block_size + 1] for i in ix])
         return x.to(self.config.device), y.to(self.config.device)
@@ -81,6 +83,7 @@ class TextDataset:
 # ---------------------------------------------------------------------------
 # 3. MODEL COMPONENTS — Each one is a future upgrade target
 # ---------------------------------------------------------------------------
+
 
 class SelfAttention(nn.Module):
     """
@@ -112,8 +115,9 @@ class SelfAttention(nn.Module):
         # Causal mask — prevents attending to future tokens
         self.register_buffer(
             "mask",
-            torch.tril(torch.ones(config.block_size, config.block_size))
-            .view(1, 1, config.block_size, config.block_size),
+            torch.tril(torch.ones(config.block_size, config.block_size)).view(
+                1, 1, config.block_size, config.block_size
+            ),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -175,14 +179,15 @@ class TransformerBlock(nn.Module):
         self.ffn = FeedForward(config)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.ln1(x))   # Residual connection
-        x = x + self.ffn(self.ln2(x))    # Residual connection
+        x = x + self.attn(self.ln1(x))  # Residual connection
+        x = x + self.ffn(self.ln2(x))  # Residual connection
         return x
 
 
 # ---------------------------------------------------------------------------
 # 4. THE FULL MODEL
 # ---------------------------------------------------------------------------
+
 
 class MiniGPT(nn.Module):
     """
@@ -197,10 +202,14 @@ class MiniGPT(nn.Module):
         self.config = config
 
         self.token_emb = nn.Embedding(config.vocab_size, config.n_embd)
-        self.pos_emb = nn.Embedding(config.block_size, config.n_embd)  # TODO: Replace with RoPE
+        self.pos_emb = nn.Embedding(
+            config.block_size, config.n_embd
+        )  # TODO: Replace with RoPE
         self.drop = nn.Dropout(config.dropout)
 
-        self.blocks = nn.Sequential(*[TransformerBlock(config) for _ in range(config.n_layer)])
+        self.blocks = nn.Sequential(
+            *[TransformerBlock(config) for _ in range(config.n_layer)]
+        )
         self.ln_f = nn.LayerNorm(config.n_embd)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
@@ -225,11 +234,13 @@ class MiniGPT(nn.Module):
         self, idx: torch.Tensor, targets: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         B, T = idx.shape
-        assert T <= self.config.block_size, f"Sequence length {T} exceeds block_size {self.config.block_size}"
+        assert (
+            T <= self.config.block_size
+        ), f"Sequence length {T} exceeds block_size {self.config.block_size}"
 
         # Forward pass
-        tok_emb = self.token_emb(idx)                              # (B, T, n_embd)
-        pos_emb = self.pos_emb(torch.arange(T, device=idx.device)) # (T, n_embd)
+        tok_emb = self.token_emb(idx)  # (B, T, n_embd)
+        pos_emb = self.pos_emb(torch.arange(T, device=idx.device))  # (T, n_embd)
         x = self.drop(tok_emb + pos_emb)
         x = self.blocks(x)
         x = self.ln_f(x)
@@ -238,17 +249,21 @@ class MiniGPT(nn.Module):
         # Loss (only during training)
         loss = None
         if targets is not None:
-            loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)), targets.view(-1)
-            )
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
         return logits, loss
 
     @torch.no_grad()
-    def generate(self, idx: torch.Tensor, max_new_tokens: int, temperature: float = 0.8, top_k: int = 50) -> torch.Tensor:
+    def generate(
+        self,
+        idx: torch.Tensor,
+        max_new_tokens: int,
+        temperature: float = 0.8,
+        top_k: int = 50,
+    ) -> torch.Tensor:
         """Autoregressive generation with temperature and top-k sampling."""
         for _ in range(max_new_tokens):
             # Crop to block_size if needed
-            idx_cond = idx[:, -self.config.block_size:]
+            idx_cond = idx[:, -self.config.block_size :]
             logits, _ = self(idx_cond)
             logits = logits[:, -1, :] / temperature
 
@@ -266,6 +281,7 @@ class MiniGPT(nn.Module):
 # ---------------------------------------------------------------------------
 # 5. TRAINING LOOP
 # ---------------------------------------------------------------------------
+
 
 @torch.no_grad()
 def estimate_loss(model: MiniGPT, dataset: TextDataset, config: GPTConfig) -> dict:
@@ -294,7 +310,9 @@ def train(config: GPTConfig, dataset: TextDataset) -> MiniGPT:
         # Periodic evaluation
         if step % config.eval_interval == 0 or step == config.max_iters - 1:
             losses = estimate_loss(model, dataset, config)
-            print(f"step {step:5d} | train loss: {losses['train']:.4f} | val loss: {losses['val']:.4f}")
+            print(
+                f"step {step:5d} | train loss: {losses['train']:.4f} | val loss: {losses['val']:.4f}"
+            )
 
         # Training step
         x, y = dataset.get_batch("train")
@@ -312,6 +330,7 @@ def train(config: GPTConfig, dataset: TextDataset) -> MiniGPT:
 # 6. MAIN — Downloads data, trains, and generates
 # ---------------------------------------------------------------------------
 
+
 def get_shakespeare() -> str:
     path = "shakespeare.txt"
     if not pathlib.Path(path).exists():
@@ -321,29 +340,44 @@ def get_shakespeare() -> str:
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
+
 @click.group()
-@click.option("--checkpoint", type=click.Path(), default=None, help="Model checkpoint path")
+@click.option(
+    "--checkpoint", type=click.Path(), default=None, help="Model checkpoint path"
+)
 @click.pass_context
 def mini_gpt(ctx, checkpoint):
     """Dummy version of GPT model"""
     ctx.ensure_object(dict)
-    ctx.obj = {"checkpoint" : checkpoint}
+    ctx.obj = {"checkpoint": checkpoint}
+
 
 @mini_gpt.command()
 @click.pass_context
-@click.option("--prompt", type=str, default=None, help="Generate from this prompt (requires trained model)")
+@click.option(
+    "--prompt",
+    type=str,
+    default=None,
+    help="Generate from this prompt (requires trained model)",
+)
 @click.option("--max-tokens", type=int, default=100, help="Tokens to generate")
 def inference(ctx, prompt: str, max_tokens: int):
     checkpoint = ctx.obj["checkpoint"]
-    
+
     config = GPTConfig()
-    print(f"Mini GPT | {config.n_layer} layers, {config.n_head} heads, {config.n_embd} dim")
-    print(f"Context Window: {config.block_size} tokens | Vocab: {config.vocab_size} byte-level")
-    
+    print(
+        f"Mini GPT | {config.n_layer} layers, {config.n_head} heads, {config.n_embd} dim"
+    )
+    print(
+        f"Context Window: {config.block_size} tokens | Vocab: {config.vocab_size} byte-level"
+    )
+
     model = MiniGPT(config).to(config.device)
-    model.load_state_dict(torch.load(checkpoint, map_location=config.device, weights_only=True))
+    model.load_state_dict(
+        torch.load(checkpoint, map_location=config.device, weights_only=True)
+    )
     model.eval()
-    
+
     prompt_bytes = list(prompt.encode("utf_8"))
     idx = torch.tensor([prompt_bytes], dtype=torch.long, device=config.device)
     output = model.generate(idx, max_new_tokens=max_tokens)
@@ -351,23 +385,29 @@ def inference(ctx, prompt: str, max_tokens: int):
     print(f"Generated Text:\n{generated}")
     return
 
+
 @mini_gpt.command()
 @click.pass_context
 def train_model(ctx, checkpoint):
     checkpoint = ctx.obj["checkpoint"]
-    
+
     config = GPTConfig()
-    print(f"Mini GPT | {config.n_layer} layers, {config.n_head} heads, {config.n_embd} dim")
-    print(f"Context Window: {config.block_size} tokens | Vocab: {config.vocab_size} byte-level")
-    
+    print(
+        f"Mini GPT | {config.n_layer} layers, {config.n_head} heads, {config.n_embd} dim"
+    )
+    print(
+        f"Context Window: {config.block_size} tokens | Vocab: {config.vocab_size} byte-level"
+    )
+
     text = get_shakespeare()
     dataset = TextDataset(text, config)
     model = train(config, dataset)
-    
-    ckpt_path = checkpoint if checkpoint is not None else "" 
+
+    ckpt_path = checkpoint if checkpoint is not None else ""
     torch.save(model.state_dict(), checkpoint)
     print(f"Saved model to {ckpt_path}")
     return
+
 
 if __name__ == "__main__":
     mini_gpt()
