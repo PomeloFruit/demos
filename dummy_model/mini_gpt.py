@@ -3,7 +3,7 @@ This is a dummy version of a GPT model implementation in PyTorch. The template
 code is from "mini-GPT" by Andrej Karpathy: https://www.youtube.com/watch?v=kCc8FmEb1nY
 
 The goal is to build upon the initial version with more features from modern
-transsformer architectures.
+transformer architectures.
 """
 
 import math
@@ -70,12 +70,28 @@ class TextDataset:
             f"train: {len(self.train_data):,} | val: {len(self.val_data):,}"
         )
 
+    # The goal of this function is to generate batches of data for training
     def get_batch(self, split: str) -> tuple[torch.Tensor, torch.Tensor]:
         data = self.train_data if split == "train" else self.val_data
+
+        # First we generate a 1D tensor of size batch_size (64) from the ranges of
+        # 0 to len(data) - block_size (context window).
+        # The reason we only want up to block_size is because ix represents the
+        # random starting locations of the batches. Each individual batch will
+        # eventually have block_size elements, creating a 2D tensor of
+        # [batch_size, block_size]
         ix = torch.randint(
             len(data) - self.config.block_size, (self.config.batch_size,)
         )
+
+        # This line creates a 1D tensor for each of the starting indices in ix.
+        # It goes from the starting index to block_size elements after.
+        # torch.stack then stacks all of these tensors together (batch_size) and
+        # stacks them into a 2D tensor of size [batch_size, block_size]
         x = torch.stack([data[i : i + self.config.block_size] for i in ix])
+
+        # This line does the same as the top except it shifts everything by 1 as
+        # y will be the output/label/answer that x will be used to predict.
         y = torch.stack([data[i + 1 : i + self.config.block_size + 1] for i in ix])
         return x.to(self.config.device), y.to(self.config.device)
 
@@ -283,32 +299,43 @@ class MiniGPT(nn.Module):
 # ---------------------------------------------------------------------------
 
 
+# Python decordator to disable gradient computation for everything inside the function
 @torch.no_grad()
 def estimate_loss(model: MiniGPT, dataset: TextDataset, config: GPTConfig) -> dict:
     """Average loss over several batches for more stable evaluation."""
     model.eval()
     losses = {}
     for split in ["train", "val"]:
+
+        # Create a 1D tensor of eval_iters (200) 0s, each corresponding to a batch's loss
         batch_losses = torch.zeros(config.eval_iters)
         for k in range(config.eval_iters):
+            # For each batch get the input and output tensors of data
             x, y = dataset.get_batch(split)
+            # Calculate the loss from the model, where x is input, y is output/label
             _, loss = model(x, y)
+            # Save the loss in the 1D batch_losses tensor
             batch_losses[k] = loss.item()
+        # Save the average loss for the split (training/validation)
         losses[split] = batch_losses.mean().item()
     model.train()
     return losses
 
 
 def train(config: GPTConfig, dataset: TextDataset) -> MiniGPT:
+    # Set the model to use the device (CPU or CUDA)
     model = MiniGPT(config).to(config.device)
+    # Use the adam optimizer with the set learning rate
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
 
     print(f"\nTraining on {config.device} for {config.max_iters} steps...")
     print("-" * 60)
 
+    # Train for max_iters (5000) iterations
     for step in range(config.max_iters):
-        # Periodic evaluation
+        # Periodic evaluation - every 500 iterations or the last iteration
         if step % config.eval_interval == 0 or step == config.max_iters - 1:
+            # Calculate the losses up to now
             losses = estimate_loss(model, dataset, config)
             print(
                 f"step {step:5d} | train loss: {losses['train']:.4f} | val loss: {losses['val']:.4f}"
@@ -316,11 +343,16 @@ def train(config: GPTConfig, dataset: TextDataset) -> MiniGPT:
 
         # Training step
         x, y = dataset.get_batch("train")
+        # Feed model with input (x) and compare against output (y). Use cross-entropy loss
+        # to calculate loss
         _, loss = model(x, y)
+        # Clear the gradients from the previous step
         optimizer.zero_grad(set_to_none=True)
+        # Backpropagation
         loss.backward()
-        # Gradient clipping — prevents exploding gradients
+        # Gradient clipping to a max of 1.0 — prevents exploding gradients
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        # Update the weights
         optimizer.step()
 
     return model
