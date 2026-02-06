@@ -1,0 +1,15 @@
+# For CUDA support (requires Python 3.12 or earlier):
+# pip install torch --index-url https://download.pytorch.org/whl/cu121
+# torch>=2.1.0
+# torchvision>=0.16.0
+# torchaudio>=2.1.0
+numpy>=1.24.0
+tiktoken>=0.5.0
+datasets>=2.14.0
+wandb>=0.15.0
+einops>=0.7.0
+sentencepiece>=0.1.99
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.14.0
+torchviz>=0.0.2
