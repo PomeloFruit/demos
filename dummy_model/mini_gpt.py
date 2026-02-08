@@ -22,6 +22,7 @@ import torch.nn.functional as F
 # 1. CONFIGURATION
 # ---------------------------------------------------------------------------
 
+torch.manual_seed(1234)
 
 @dataclass
 class GPTConfig:
@@ -129,6 +130,7 @@ class SelfAttention(nn.Module):
         self.head_dim = config.n_embd // config.n_head
 
         # Causal mask — prevents attending to future tokens
+        # Creates a triangular matrix with the top right triangle zeroed out
         self.register_buffer(
             "mask",
             torch.tril(torch.ones(config.block_size, config.block_size)).view(
@@ -140,18 +142,35 @@ class SelfAttention(nn.Module):
         B, T, C = x.shape  # batch, sequence length, embedding dim
 
         # Compute Q, K, V for all heads in parallel
+        
+        # Q - basically a token saying "What am I looking for/This is what I'm looking for"
+        # K - basically a token saying "What do I contain?/This is what I contain"
+        # V - the value that's being aggregated for this head
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
         q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)  # (B, nh, T, hd)
         k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
         # Attention scores
+        # (B, nh, T, hd) @ (B, nh, hd, T) --> (B, nh, T, T) * (1/sqrt(head size)) <-- this is from the Attention Is Everything You Need paper
+        # This is "scaled attention", a normalization technique introduced by this paper
+        # It is meant to control the variance at initialization so that Softmax does not turn attention into one hot vectors
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(self.head_dim))
+        # Creating the triangular matrix, with -inf in the top right triangle
+        # This is because we only want the information from the past tokens up until the current token
         att = att.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
+        # Softmax to normalize the values between 0 and 1
         att = F.softmax(att, dim=-1)
+        # During training, it randomly sets some (20%) of attention weights to 0 each forward pass. Forcing the model to not rely too 
+        # heavily on any single token-to-token relationship
         att = self.attn_dropout(att)
 
         # Weighted sum of values
+        #.continguous stores data in memory in consecutive order, which .view requires
+        #.view merges the last 2 dimensions into C
+        # (B, nh, T, T) @ (B, nh, T, hd) --> (B, nh, T, hd) --> (B, T, nh, nd) --> (B, T, C)
+        # Rule for dot product is that the inner dimensions collapse and the outer dimensions remain
+        # PyTorch only dot products the last 2 dimensions, and everything before is treated as batch dimensions
         out = (att @ v).transpose(1, 2).contiguous().view(B, T, C)
         return self.resid_dropout(self.c_proj(out))
 
