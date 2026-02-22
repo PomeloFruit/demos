@@ -137,7 +137,7 @@ class SelfAttention(nn.Module):
                 1, 1, config.block_size, config.block_size
             ),
         )
-
+ACVBJK  
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.shape  # batch, sequence length, embedding dim
 
